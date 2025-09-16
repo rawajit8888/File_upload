@@ -1,0 +1,63 @@
+import os
+import pickle
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+
+class ProcessLabels:
+    def __init__(self, parsed_label_config, model_dir, training_mode=False):
+        self.parsed_label_config = parsed_label_config
+        self.model_dir = model_dir
+        self.encoder_dir = f"{model_dir}\\encoders"
+        os.makedirs(self.encoder_dir, exist_ok=True)
+        self.training_mode = training_mode  # Store training mode to control updates
+        self.initEncoder()
+
+    def initEncoder(self):
+        self.labels = {
+            "classification": {"encoder": None},
+            "sentiment": {"encoder": None}
+        }
+        self.getLabelEncoder('classification')
+        self.getLabelEncoder('sentiment')
+
+    def saveLabelEncoderFile(self, labelencoder, filepath):
+        with open(filepath, 'wb') as file:
+            pickle.dump(labelencoder, file)
+
+    def getLabelEncoder(self, labeltype):
+        try:
+            if self.labels[labeltype]["encoder"] is None:
+                file_path = f"{self.encoder_dir}\\{labeltype}_label_encoder.pkl"
+                
+                if os.path.exists(file_path):
+                    with open(file_path, 'rb') as file:
+                        label_encoder = pickle.load(file)
+                else:
+                    label_encoder = LabelEncoder()
+                    label_encoder.fit([])  # Initialize with empty if file doesn't exist
+
+                # Get new labels from config if provided
+                new_labels = []
+                if self.parsed_label_config is not None and labeltype in self.parsed_label_config:
+                    all_labels = self.parsed_label_config[labeltype].get('labels', [])
+                    new_labels = [label for label in all_labels if label not in label_encoder.classes_.tolist()]
+
+                if len(new_labels) > 0:
+                    if self.training_mode:
+                        print(f"Adding new label(s) during training: {new_labels}")
+                        new_labels_np = np.array(new_labels, dtype=label_encoder.classes_.dtype)
+                        updated_classes = np.concatenate((label_encoder.classes_, new_labels_np))
+                        label_encoder.fit(updated_classes)
+                        self.saveLabelEncoderFile(label_encoder, file_path)
+                    else:
+                        print(f"Warning: New labels {new_labels} found during inference, ignoring and not updating encoder.")
+
+                self.labels[labeltype]["encoder"] = label_encoder
+            return self.labels[labeltype]["encoder"]
+
+        except Exception as e:
+            print(f"Error in getLabelEncoder for {labeltype}: {e}")
+
+    def __getitem__(self, key):
+        # Allow accessing label encoder like a dictionary
+        return self.labels[key]["encoder"]
